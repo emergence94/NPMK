@@ -105,21 +105,29 @@ if ~exist('duration', 'var'); duration = (1:size(NSx.Data, 2))'; end
 % if ~exist('filter', 'var');   filter = [];  end
 
 %% Apply filter
+
+t = tic;
 Data = double(NSx.Data(channels, duration).');
 
-if length(filterCorner) > 1
-    
-    % using bandpass filter
-    [b, a] = butter(4, filterCorner/15000, 'bandpass');
-    Data = filter(b, a, Data);    
-else
-    
-    % using highpass filter
-    [b, a] = butter(4, filterCorner/15000, 'high');
-    Data = filter(b, a, Data);
-end
+% filter anyway
+[b, a] = butter(4, filterCorner./15000, 'bandpass');
+Data = filter(b, a, Data);
+% end
+
+disp(['filtering spends ' num2str(toc(t)) ' seconds']);
 
 %% Threshold
+
+t = tic;
+
+% positive threshold means RMS multiplier
+if length(threshold) == 1 && (threshold > 0)
+    rms = sqrt(mean(Data.^2));
+    threshold = rms * threshold / (threshold * double(NSx.ElectrodesInfo(1).MaxDigiValue) / ...
+            double(NSx.ElectrodesInfo(1).MaxAnalogValue));
+end
+
+
 if isfield(NSx, 'ElectrodesInfo')
     if (isscalar(threshold) && all([NSx.ElectrodesInfo(channels).MaxAnalogValue] == NSx.ElectrodesInfo(1).MaxAnalogValue) && ...
             all([NSx.ElectrodesInfo(channels).MaxDigiValue] == NSx.ElectrodesInfo(1).MaxDigiValue))
@@ -133,7 +141,7 @@ if isfield(NSx, 'ElectrodesInfo')
 end
 
 [row, col] = find((diff(bsxfun(@minus, Data, threshold) > 0) < 0).');
-clear threshold;
+% clear threshold;
 Spikes.TimeStamp = col' - preThreshold;
 clear col;
 Spikes.Electrode = row';
@@ -143,6 +151,8 @@ Spikes.Electrode(Spikes.TimeStamp < 1) = [];
 Spikes.TimeStamp(Spikes.TimeStamp < 1) = [];
 Spikes.Electrode(Spikes.TimeStamp + spikelen > size(NSx.Data, 2)) = [];
 Spikes.TimeStamp(Spikes.TimeStamp + spikelen > size(NSx.Data, 2)) = [];
+
+disp(['thresholding spends ' num2str(toc(t)) ' seconds']);
 
 %% Lockout violation removal
 % this makes sure all spikes are at least one spike length apart
@@ -164,10 +174,20 @@ end
 clear idx;
 
 %% Spike extraction
+
+t = tic;
 Spikes.Waveform = zeros(spikelen, length(Spikes.TimeStamp));
 for ii = 1:length(Spikes.TimeStamp)
     ts = Spikes.TimeStamp(ii):(Spikes.TimeStamp(ii) + spikelen - 1);
+    
+%      % amplitude rejection
+%     if sum(abs(Data(ts, Spikes.Electrode(ii))) > abs(threshold*3))
+%         continue;
+%     end
+    
     Spikes.Waveform(:, ii) = Data(ts, Spikes.Electrode(ii));
 end
 % convert index to actual channel number
 Spikes.Electrode = channels(Spikes.Electrode);
+disp(['extraction spends ' num2str(toc(t)) ' seconds']);
+
